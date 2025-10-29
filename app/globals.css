@@ -1,5 +1,5 @@
-@import "tailwindcss";
-@import "tw-animate-css";
+@import 'tailwindcss';
+@import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -10,7 +10,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.68 0.18 50);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -46,8 +46,8 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.145 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: oklch(0.58 0.18 50);
+  --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -75,27 +75,8 @@
 }
 
 @theme inline {
-  /* optional: --font-sans, --font-serif, --font-mono if they are applied in the layout.tsx */
-  --font-sans: "Geist", "Geist Fallback";
-  --font-mono: "Geist Mono", "Geist Mono Fallback";
-
-  /* Color System - Modern AI App */
-  --color-background: #0f0f0f;
-  --color-foreground: #ffffff;
-  --color-muted: #1a1a1a;
-  --color-muted-foreground: #a0a0a0;
-  --color-primary: #3b82f6;
-  --color-primary-foreground: #ffffff;
-  --color-accent: #06b6d4;
-  --color-accent-foreground: #0f0f0f;
-  --color-border: #2a2a2a;
-  --color-input: #1a1a1a;
-  --color-ring: #3b82f6;
-  --color-success: #10b981;
-  --color-error: #ef4444;
-  --color-warning: #f59e0b;
-  --radius: 0.5rem;
-
+  --font-sans: 'Geist', 'Geist Fallback';
+  --font-mono: 'Geist Mono', 'Geist Mono Fallback';
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -141,21 +122,4 @@
   body {
     @apply bg-background text-foreground;
   }
-}
-
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  @apply w-2 h-2;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-muted;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-muted-foreground rounded;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-foreground/50;
 }
