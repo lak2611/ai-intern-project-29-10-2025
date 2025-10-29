@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./prisma/dev.db"
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  resources Resource[]
+}
+
+
+model Resource {
+  id           String   @id @default(cuid())
+  sessionId    String
+  originalName String
+  storedPath   String   @unique
+  mimeType     String
+  sizeBytes    Int
+  createdAt    DateTime @default(now())
+
+  // Relations
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+

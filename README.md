@@ -1,30 +1,57 @@
-# Mini App UI/UX
+## Local Development Setup
 
-*Automatically synced with your [v0.app](https://v0.app) deployments*
+Follow these steps to run the project locally with Prisma + SQLite sessions API.
 
-[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)](https://vercel.com/leanhkhoi2611s-projects/v0-mini-app-ui-ux)
-[![Built with v0](https://img.shields.io/badge/Built%20with-v0.app-black?style=for-the-badge)](https://v0.app/chat/projects/j36itsrzLMW)
+### 1) Install dependencies
 
-## Overview
+```bash
+pnpm install
+```
 
-This repository will stay in sync with your deployed chats on [v0.app](https://v0.app).
-Any changes you make to your deployed app will be automatically pushed to this repository from [v0.app](https://v0.app).
+If prompted about ignored build scripts, you can approve them:
 
-## Deployment
+```bash
+pnpm approve-builds
+```
 
-Your project is live at:
+### 2) Prisma/SQLite setup
 
-**[https://vercel.com/leanhkhoi2611s-projects/v0-mini-app-ui-ux](https://vercel.com/leanhkhoi2611s-projects/v0-mini-app-ui-ux)**
+- The Prisma schema is at `prisma/schema.prisma` and is preconfigured to use SQLite at `file:./prisma/dev.db`.
+- If you prefer using an environment variable instead, switch the datasource `url` to `env("DATABASE_URL")` and create a `.env` file with:
 
-## Build your app
+```bash
+DATABASE_URL="file:./prisma/dev.db"
+```
 
-Continue building your app on:
+### 3) Generate Prisma client and apply migrations
 
-**[https://v0.app/chat/projects/j36itsrzLMW](https://v0.app/chat/projects/j36itsrzLMW)**
+```bash
+pnpm prisma generate
+pnpm prisma migrate dev
+```
 
-## How It Works
+This will create the SQLite database and the `Session` table with fields: `id`, `name`, `createdAt`, `updatedAt`.
 
-1. Create and modify your project using [v0.app](https://v0.app)
-2. Deploy your chats from the v0 interface
-3. Changes are automatically pushed to this repository
-4. Vercel deploys the latest version from this repository
+### 4) Run the development server
+
+```bash
+pnpm dev
+```
+
+Visit the app at `http://localhost:3000`.
+
+## API Endpoints
+
+- `GET /api/sessions` — list sessions
+- `POST /api/sessions` — create session `{ name: string }`
+- `GET /api/sessions/:id` — get a session by id
+- `PATCH /api/sessions/:id` — update session `{ name?: string }`
+- `DELETE /api/sessions/:id` — delete a session
+
+## Frontend Integration
+
+The UI component `components/sidebar.tsx` is wired to the API to:
+
+- Load sessions on mount
+- Create sessions via the dialog
+- Delete sessions from the list

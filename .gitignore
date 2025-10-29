@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/.pnpm-store/*
 
 # next.js
 /.next/
@@ -25,3 +26,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# uploads
+/uploads
