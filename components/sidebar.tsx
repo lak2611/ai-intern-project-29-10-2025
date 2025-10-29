@@ -5,6 +5,7 @@ import { Plus, Trash2, Menu, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { toast } from 'react-toastify';
 import { Session } from '@prisma/client';
+import { useSession } from './session-context';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -12,12 +13,12 @@ interface SidebarProps {
 }
 
 export function Sidebar({ isOpen, onToggle }: SidebarProps) {
+  const { selectedSessionId, setSelectedSessionId } = useSession();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sessionName, setSessionName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [resourcesLoading, setResourcesLoading] = useState(false);
   const [resources, setResources] = useState<
     Array<{ id: string; sessionId: string; originalName: string; storedPath: string; mimeType: string; sizeBytes: number; createdAt: string }>
@@ -80,6 +81,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
       if (!res.ok) throw new Error('Failed to create session');
       const created = await res.json();
       setSessions((prev) => [created, ...prev]);
+      setSelectedSessionId(created.id); // Auto-select the newly created session
       handleCloseDialog();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create session');
