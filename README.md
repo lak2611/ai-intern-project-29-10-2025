@@ -1,3 +1,7 @@
+## Video Demo
+
+Watch the demo: [Project Video Demo](https://drive.google.com/file/d/1nc_K_PaKXCl92fbsBgAYB4z_LS1Zg2q8/view?usp=sharing)
+
 ## Local Development Setup
 
 Follow these steps to run the project locally with Prisma + SQLite sessions API.
