@@ -41,9 +41,11 @@ export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;
 
 ## Service Layer
 
-```1:31:lib/session-service.ts
+```1:58:lib/session-service.ts
 import { prisma } from './prisma';
 import { createSessionSchema, updateSessionSchema, type CreateSessionInput, type UpdateSessionInput } from './schemas/session';
+import { checkpointer } from './langgraph/checkpointer';
+import { resourceService } from './resource-service';
 
 class SessionService {
   list = async () => {
@@ -68,7 +70,31 @@ class SessionService {
     if (!id) {
       throw new Error('id is required');
     }
-    return prisma.session.delete({ where: { id } });
+
+    // Delete associated resources (files and DB records)
+    try {
+      const resources = await resourceService.listBySession(id);
+      await Promise.all(resources.map((resource: any) => resourceService.delete(resource.id)));
+    } catch (error) {
+      // Log error but don't fail the deletion if resources don't exist or deletion fails
+      console.error(`Error deleting resources for session ${id}:`, error);
+      // Continue with session deletion even if resource deletion fails
+    }
+
+    // Delete associated checkpoint thread data
+    // SessionId is used as thread_id in LangGraph checkpointer
+    try {
+      await checkpointer.deleteThread(id);
+    } catch (error) {
+      // Log error but don't fail the deletion if checkpoint doesn't exist
+      console.error(`Error deleting checkpoint thread for session ${id}:`, error);
+      // Continue with session deletion even if checkpoint deletion fails
+    }
+
+    // Delete the session from Prisma
+    const deletedSession = await prisma.session.delete({ where: { id } });
+
+    return deletedSession;
   };
 }
 
@@ -77,6 +103,7 @@ export const sessionService = new SessionService();
 
 - Centralizes all DB access and validation parsing.
 - Returns plain Prisma entities, ready for API responses.
+- When deleting a session, also deletes all associated resources (files and DB records) and checkpoint thread data.
 
 ## API Routes (Next.js Route Handlers)
 

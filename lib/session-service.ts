@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { createSessionSchema, updateSessionSchema, type CreateSessionInput, type UpdateSessionInput } from './schemas/session';
 import { checkpointer } from './langgraph/checkpointer';
+import { resourceService } from './resource-service';
 
 class SessionService {
   list = async () => {
@@ -26,8 +27,15 @@ class SessionService {
       throw new Error('id is required');
     }
 
-    // Delete the session from Prisma
-    const deletedSession = await prisma.session.delete({ where: { id } });
+    // Delete associated resources (files and DB records)
+    try {
+      const resources = await resourceService.listBySession(id);
+      await Promise.all(resources.map((resource: any) => resourceService.delete(resource.id)));
+    } catch (error) {
+      // Log error but don't fail the deletion if resources don't exist or deletion fails
+      console.error(`Error deleting resources for session ${id}:`, error);
+      // Continue with session deletion even if resource deletion fails
+    }
 
     // Delete associated checkpoint thread data
     // SessionId is used as thread_id in LangGraph checkpointer
@@ -38,6 +46,9 @@ class SessionService {
       console.error(`Error deleting checkpoint thread for session ${id}:`, error);
       // Continue with session deletion even if checkpoint deletion fails
     }
+
+    // Delete the session from Prisma
+    const deletedSession = await prisma.session.delete({ where: { id } });
 
     return deletedSession;
   };
