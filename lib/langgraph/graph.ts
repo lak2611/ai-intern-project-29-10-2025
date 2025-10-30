@@ -1,4 +1,4 @@
-import { StateGraph, Annotation } from '@langchain/langgraph';
+import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
 import { loadCsvMetadataNode, agentNode, saveMessageNode } from './nodes';
 import { CsvResourceMetadata, Message } from './agent-state';
 
@@ -36,9 +36,9 @@ export function initializeGraph() {
     .addNode('loadCsvMetadata', loadCsvMetadataNode)
     .addNode('agent', agentNode)
     .addNode('saveMessage', saveMessageNode)
-    .addEdge('__start__', 'loadCsvMetadata')
+    .addEdge(START, 'loadCsvMetadata')
     .addEdge('loadCsvMetadata', 'agent')
     .addEdge('agent', 'saveMessage')
-    .addEdge('saveMessage', '__end__')
+    .addEdge('saveMessage', END)
     .compile();
 }

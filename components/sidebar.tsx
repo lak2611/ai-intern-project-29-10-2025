@@ -267,20 +267,27 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
                 {sessions.map((session) => (
                   <div
                     key={session.id}
-                    className={`p-3 rounded-lg cursor-pointer transition-colors group ${
-                      selectedSessionId === session.id ? 'bg-background/80' : 'bg-background hover:bg-background/80'
+                    className={`p-3 rounded-lg cursor-pointer transition-all group relative ${
+                      selectedSessionId === session.id
+                        ? 'bg-primary/10 border-l-4 border-primary'
+                        : 'bg-background hover:bg-background/80 border-l-4 border-transparent'
                     }`}
                     onClick={() => handleSelectSession(session.id)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{session.name}</p>
+                        <p className={`text-sm font-medium truncate ${selectedSessionId === session.id ? 'text-primary' : 'text-foreground'}`}>
+                          {session.name}
+                        </p>
                         <p className="text-xs text-muted-foreground">{new Date(session.createdAt).toLocaleString()}</p>
                       </div>
                       <button
                         aria-label="Delete session"
                         className="opacity-0 group-hover:opacity-100 p-1 hover:bg-muted rounded transition-all"
-                        onClick={() => handleDeleteSession(session.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSession(session.id);
+                        }}
                       >
                         <Trash2 size={16} className="text-error" />
                       </button>
