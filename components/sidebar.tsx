@@ -70,7 +70,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   };
 
   const handleCreateSession = async () => {
-    if (!sessionName.trim()) return;
+    if (!sessionName.trim() || isSubmitting) return;
     try {
       setIsSubmitting(true);
       const res = await fetch('/api/sessions', {
@@ -93,6 +93,7 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
+      e.stopPropagation();
       handleCreateSession();
     }
   };
