@@ -11,6 +11,7 @@ const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  console.log('🚀 ~ SessionProvider ~ selectedSessionId:', selectedSessionId);
 
   return <SessionContext.Provider value={{ selectedSessionId, setSelectedSessionId }}>{children}</SessionContext.Provider>;
 }

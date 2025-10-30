@@ -107,25 +107,22 @@ function extractTimestamp(message: any): Date {
 }
 
 /**
- * Check if an AI message should be filtered out (has tool calls but no text content)
+ * Check if a message has tool calls
  */
-function shouldFilterAIMessage(message: any): boolean {
-  const role = getMessageType(message);
+function hasToolCalls(message: any): boolean {
+  if (!message || typeof message !== 'object') return false;
 
-  // Only filter AI messages
-  if (role !== 'assistant') return false;
+  // Check if message has tool_calls array with items
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+    return true;
+  }
 
-  // Check if message has tool calls
-  const hasToolCalls =
-    (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) ||
-    (Array.isArray(message.content) && message.content.some((c: any) => c?.type === 'functionCall'));
+  // Check if content array contains functionCall blocks
+  if (Array.isArray(message.content)) {
+    return message.content.some((c: any) => c?.type === 'functionCall');
+  }
 
-  // Check if message has text content
-  const textContent = extractContent(message);
-  const hasTextContent = textContent.trim().length > 0;
-
-  // Filter out if has tool calls but no text content
-  return hasToolCalls && !hasTextContent;
+  return false;
 }
 
 class MessageService {
@@ -143,10 +140,10 @@ class MessageService {
         const messages = checkpoint.channel_values.messages as any[];
 
         // Filter and convert LangChain messages to API-compatible format
-        // Filter out AI messages that only have tool calls but no text content
+        // Filter out messages that have tool calls
         return messages
           .filter(isMessageType)
-          .filter((message) => !shouldFilterAIMessage(message))
+          .filter((message) => !hasToolCalls(message))
           .map((message, index) => {
             const role = getMessageType(message);
             if (!role) {
@@ -195,8 +192,8 @@ class MessageService {
       if (checkpoint && checkpoint.channel_values.messages) {
         const messages = checkpoint.channel_values.messages as any[];
 
-        // Filter to only message types we support, and filter out AI messages with tool calls but no content
-        const validMessages = messages.filter(isMessageType).filter((message) => !shouldFilterAIMessage(message));
+        // Filter to only message types we support, and filter out messages with tool calls
+        const validMessages = messages.filter(isMessageType).filter((message) => !hasToolCalls(message));
 
         if (validMessages[index]) {
           const message = validMessages[index];

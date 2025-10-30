@@ -47,7 +47,7 @@ export const filterCsvRowsTool = new DynamicStructuredTool({
     filtersJson: z
       .string()
       .describe(
-        'JSON string of filter conditions array. Each filter has: column (string), operator (eq|gt|lt|gte|lte|contains), value (string|number)'
+        'JSON string of filter conditions array. Each filter has: column (string), operator (eq|gt|lt|gte|lte|contains|regex), value (string|number). For regex operator, value should be a regex pattern string.'
       ),
   }),
   func: async ({ resourceId, filtersJson }) => {
@@ -114,7 +114,7 @@ export const filterAndAggregateCsvDataTool = new DynamicStructuredTool({
     filtersJson: z
       .string()
       .describe(
-        'JSON string of filter conditions array. Each filter has: column (string), operator (eq|gt|lt|gte|lte|contains), value (string|number)'
+        'JSON string of filter conditions array. Each filter has: column (string), operator (eq|gt|lt|gte|lte|contains|regex), value (string|number). For regex operator, value should be a regex pattern string.'
       ),
     operation: z.enum(['sum', 'avg', 'count', 'min', 'max', 'group_by']).describe('Aggregation operation'),
     column: z.string().optional().describe('Column name for sum/avg/min/max operations'),
@@ -171,6 +171,47 @@ export const getCsvStatisticsTool = new DynamicStructuredTool({
 });
 
 /**
+ * Tool: Execute SQL query on CSV data
+ */
+export const executeSqlQueryTool = new DynamicStructuredTool({
+  name: 'execute_sql_query',
+  description:
+    'Executes a SQL SELECT query on CSV data. Use this for filtering, aggregating, joining, or any complex data analysis. ' +
+    'The table name is "csv_data". Column names with spaces or special characters should be quoted with double quotes. ' +
+    'Examples: SELECT * FROM csv_data LIMIT 10; SELECT "First Name", Age FROM csv_data WHERE Age > 25; ' +
+    'SELECT Department, AVG(CAST(Salary AS REAL)) as avg_salary FROM csv_data GROUP BY Department; ' +
+    'Only SELECT queries are allowed. Supports WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, JOINs, subqueries, and all SQLite functions.',
+  schema: z.object({
+    resourceId: z.string().describe('The ID of the CSV resource to query'),
+    sqlQuery: z
+      .string()
+      .describe(
+        'SQL SELECT query to execute. Use quoted identifiers for column names with spaces (e.g., "First Name"). ' +
+          'Table name should be "csv_data" or will be automatically replaced. ' +
+          'SQLite type coercion handles numeric operations on text columns automatically.'
+      ),
+  }),
+  func: async ({ resourceId, sqlQuery }) => {
+    try {
+      const result = await csvAnalysisService.executeSqlQuery(resourceId, sqlQuery);
+      return JSON.stringify(
+        {
+          success: true,
+          columns: result.columns,
+          rowCount: result.rowCount,
+          rows: result.rows.slice(0, 500), // Limit to 500 rows for response size
+          totalRows: result.rowCount,
+        },
+        null,
+        2
+      );
+    } catch (error: any) {
+      return JSON.stringify({ success: false, error: error.message });
+    }
+  },
+});
+
+/**
  * Tool: Search CSV text
  */
 export const searchCsvTextTool = new DynamicStructuredTool({
@@ -203,12 +244,17 @@ export const searchCsvTextTool = new DynamicStructuredTool({
 });
 /**
  * Export all CSV tools
+ * Note: execute_sql_query replaces filter_csv_rows, aggregate_csv_data,
+ * filter_and_aggregate_csv_data, and search_csv_text as SQL can handle all these operations.
+ * load_csv_data is kept for convenience but can also be replaced with SELECT * FROM csv_data LIMIT N
  */
 export const csvTools = [
   loadCsvDataTool,
-  filterCsvRowsTool,
-  aggregateCsvDataTool,
-  filterAndAggregateCsvDataTool,
-  getCsvStatisticsTool,
-  searchCsvTextTool,
+  executeSqlQueryTool,
+  // Deprecated tools - replaced by execute_sql_query
+  // filterCsvRowsTool,        // Use: SELECT * FROM csv_data WHERE ...
+  // aggregateCsvDataTool,     // Use: SELECT SUM(column), AVG(column) FROM csv_data
+  // filterAndAggregateCsvDataTool, // Use: SELECT ... WHERE ... GROUP BY ...
+  // searchCsvTextTool,         // Use: SELECT * FROM csv_data WHERE column LIKE '%term%'
+  // getCsvStatisticsTool,      // Use SQL with aggregate functions and subqueries
 ];

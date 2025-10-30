@@ -84,6 +84,46 @@ export function ChatMessages({ messages }: ChatMessagesProps) {
                         </pre>
                       );
                     },
+                    table({ children, ...props }: any) {
+                      return (
+                        <div className="overflow-x-auto my-3 -mx-4 px-4">
+                          <table className="min-w-full border-collapse border border-border/50 rounded-lg overflow-hidden" {...props}>
+                            {children}
+                          </table>
+                        </div>
+                      );
+                    },
+                    thead({ children, ...props }: any) {
+                      return (
+                        <thead className="bg-muted/80" {...props}>
+                          {children}
+                        </thead>
+                      );
+                    },
+                    tbody({ children, ...props }: any) {
+                      return <tbody {...props}>{children}</tbody>;
+                    },
+                    tr({ children, ...props }: any) {
+                      return (
+                        <tr className="border-b border-border/50" {...props}>
+                          {children}
+                        </tr>
+                      );
+                    },
+                    th({ children, ...props }: any) {
+                      return (
+                        <th className="px-4 py-2 text-left font-semibold border-r border-border/50 last:border-r-0" {...props}>
+                          {children}
+                        </th>
+                      );
+                    },
+                    td({ children, ...props }: any) {
+                      return (
+                        <td className="px-4 py-2 border-r border-border/50 last:border-r-0" {...props}>
+                          {children}
+                        </td>
+                      );
+                    },
                   }}
                 >
                   {message.content || '...'}

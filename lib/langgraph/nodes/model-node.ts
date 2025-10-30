@@ -40,13 +40,6 @@ export async function modelNode(state: AgentState): Promise<Partial<AgentState>>
     currentQueryMessage =
       state.currentQueryImages && state.currentQueryImages.length > 0
         ? (() => {
-            console.log('📸 Processing message with images:', {
-              queryText: state.currentQuery,
-              imageCount: state.currentQueryImages.length,
-              firstImageMimeType: state.currentQueryImages[0]?.mimeType,
-              firstImageDataLength: state.currentQueryImages[0]?.data?.length,
-            });
-
             const imageContents = state.currentQueryImages.map((img) => {
               // Ensure base64 data is clean (no whitespace)
               const cleanData = img.data?.trim() || img.data;
@@ -66,11 +59,6 @@ export async function modelNode(state: AgentState): Promise<Partial<AgentState>>
               { type: 'text' as const, text: queryText },
               ...imageContents,
             ];
-
-            console.log('📸 Created HumanMessage with content:', {
-              textLength: content[0] && 'text' in content[0] ? content[0].text.length : 0,
-              imageCount: imageContents.length,
-            });
 
             return new HumanMessage({
               content,

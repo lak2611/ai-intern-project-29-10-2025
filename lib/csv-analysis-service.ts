@@ -1,6 +1,7 @@
 import Papa from 'papaparse';
 import fs from 'node:fs';
 import { resourceService } from './resource-service';
+import Database from 'better-sqlite3';
 
 export interface ParsedCsvData {
   headers: string[];
@@ -17,7 +18,7 @@ export interface CsvSchema {
 
 export interface Filter {
   column: string;
-  operator: 'eq' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains';
+  operator: 'eq' | 'gt' | 'lt' | 'gte' | 'lte' | 'contains' | 'regex';
   value: any;
 }
 
@@ -148,6 +149,14 @@ export class CsvAnalysisService {
             return Number(value) <= Number(filterValue);
           case 'contains':
             return String(value).toLowerCase().includes(String(filterValue).toLowerCase());
+          case 'regex':
+            try {
+              const regex = new RegExp(String(filterValue), 'i');
+              return regex.test(String(value));
+            } catch (error) {
+              // Invalid regex pattern, return false
+              return false;
+            }
           default:
             return false;
         }
@@ -317,6 +326,91 @@ export class CsvAnalysisService {
       rows: matchingRows,
       rowCount: matchingRows.length,
     };
+  }
+
+  /**
+   * Execute SQL query on CSV data using in-memory SQLite database
+   * @param resourceId - The resource ID of the CSV file
+   * @param sqlQuery - SQL SELECT query to execute
+   * @returns Query results as array of objects
+   */
+  async executeSqlQuery(resourceId: string, sqlQuery: string): Promise<{ columns: string[]; rows: Record<string, any>[]; rowCount: number }> {
+    // Security: Only allow SELECT queries
+    const trimmedQuery = sqlQuery.trim();
+    if (!trimmedQuery.toLowerCase().startsWith('select')) {
+      throw new Error('Only SELECT queries are allowed. DDL and DML operations are not permitted.');
+    }
+
+    // Load CSV data
+    const data = await this.loadCsvData(resourceId);
+
+    if (data.rows.length === 0) {
+      return {
+        columns: [],
+        rows: [],
+        rowCount: 0,
+      };
+    }
+
+    // Create in-memory SQLite database
+    const db = new Database(':memory:');
+
+    try {
+      // Sanitize column names for SQLite (replace spaces and special chars with underscores, or quote them)
+      // We'll use quoted identifiers to preserve column names
+      const sanitizedHeaders = data.headers.map((h) => `"${h.replace(/"/g, '""')}"`);
+
+      // Create table with sanitized column names
+      // All columns are TEXT type initially, SQLite will handle type coercion for numeric operations
+      const createTableSql = `
+        CREATE TABLE csv_data (
+          ${sanitizedHeaders.map((h, i) => `${h} TEXT`).join(', ')}
+        )
+      `;
+
+      db.exec(createTableSql);
+
+      // Insert data
+      const placeholders = sanitizedHeaders.map(() => '?').join(', ');
+      const insertSql = `INSERT INTO csv_data (${sanitizedHeaders.join(', ')}) VALUES (${placeholders})`;
+
+      const insertStmt = db.prepare(insertSql);
+      const insertMany = db.transaction((rows: Record<string, any>[]) => {
+        for (const row of rows) {
+          const values = data.headers.map((h) => {
+            const value = row[h];
+            return value === null || value === undefined ? null : String(value);
+          });
+          insertStmt.run(values);
+        }
+      });
+
+      insertMany(data.rows);
+
+      // Execute the SQL query
+      // Normalize table name to csv_data (case-insensitive)
+      let safeQuery = sqlQuery.trim();
+      // Replace table name references with csv_data (handle quoted and unquoted)
+      safeQuery = safeQuery.replace(/FROM\s+["']?[\w_]+["']?/gi, 'FROM csv_data');
+
+      // Execute the query
+      // Note: Column names with spaces/special chars should be quoted in SQL queries
+      // Example: SELECT "First Name", Age FROM csv_data WHERE Age > 25
+      const results = db.prepare(safeQuery).all() as Record<string, any>[];
+
+      // Get column names from result
+      const resultColumns = results.length > 0 ? Object.keys(results[0]) : [];
+
+      return {
+        columns: resultColumns,
+        rows: results,
+        rowCount: results.length,
+      };
+    } catch (error: any) {
+      throw new Error(`SQL query execution failed: ${error.message}`);
+    } finally {
+      db.close();
+    }
   }
 }
 

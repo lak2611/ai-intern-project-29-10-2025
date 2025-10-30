@@ -338,7 +338,7 @@ export const checkpointer = new Proxy({} as SqliteSaver, {
 
 `system-prompt.ts` builds the system prompt (listing available CSVs and tool usage guidance) and provides `loadCsvMetadata`, which enriches resource entries with columns and row counts via the CSV analysis service.
 
-```18:76:lib/langgraph/system-prompt.ts
+```8:76:lib/langgraph/system-prompt.ts
 export function buildSystemPrompt(csvResourcesMetadata: CsvResourceMetadata[]): string {
   let prompt = 'You are a helpful AI assistant that can analyze CSV files and images. ';
   prompt += 'You have access to CSV analysis tools to help users understand their data. ';
@@ -366,19 +366,28 @@ export function buildSystemPrompt(csvResourcesMetadata: CsvResourceMetadata[]): 
   }
 
   prompt += '\nYou have access to the following CSV analysis tools:\n';
-  prompt += '- load_csv_data: Load and parse a CSV file (use this first when analyzing data)\n';
-  prompt += '- filter_csv_rows: Filter rows based on conditions\n';
-  prompt += '- aggregate_csv_data: Perform calculations (sum, avg, count, min, max, group_by)\n';
-  prompt += '- filter_and_aggregate_csv_data: Combine filtering and aggregation efficiently\n';
-  prompt += '- get_csv_statistics: Get descriptive statistics for numeric columns\n';
-  prompt += '- search_csv_text: Search for text patterns in CSV data\n';
+  prompt += '- load_csv_data: Load and parse a CSV file (use this first to inspect schema)\n';
+  prompt +=
+    '- execute_sql_query: Execute SQL SELECT queries on CSV data - USE THIS for all filtering, aggregation, searching, and complex analysis\n';
+  prompt += '  * Table name: "csv_data"\n';
+  prompt += '  * Quote column names with spaces: SELECT "First Name", Age FROM csv_data\n';
+  prompt += '  * Supports: WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, JOINs, subqueries, and all SQLite functions\n';
+  prompt += '  * Examples:\n';
+  prompt += '    - Filter: SELECT * FROM csv_data WHERE Age > 25 AND Department = "Sales"\n';
+  prompt += '    - Aggregate: SELECT Department, AVG(CAST(Salary AS REAL)) as avg_salary FROM csv_data GROUP BY Department\n';
+  prompt += '    - Search: SELECT * FROM csv_data WHERE "First Name" LIKE "%John%"\n';
+  prompt +=
+    '    - Statistics: SELECT COUNT(*) as count, AVG(CAST(Age AS REAL)) as avg_age, MIN(CAST(Age AS REAL)) as min_age, MAX(CAST(Age AS REAL)) as max_age FROM csv_data\n';
 
   prompt += 'When a user asks about CSV data:\n';
-  prompt += '1. Identify which CSV file(s) are relevant from the list above\n';
-  prompt += '2. Use the appropriate tools to analyze the data\n';
-  prompt += '3. Provide clear, natural language explanations of your findings\n';
-  prompt += "4. If multiple CSVs are available, clarify which one you're analyzing\n";
-  prompt += '5. For large files, use the limit parameter to avoid loading everything\n\n';
+  prompt += '1. Use load_csv_data first to inspect the schema (columns and row count)\n';
+  prompt += '2. Use execute_sql_query for all data analysis tasks (filtering, aggregation, searching, etc.)\n';
+  prompt += "3. Write SQL queries that match the user's request - SQL is powerful and can handle complex queries\n";
+  prompt += '4. Quote column names with spaces or special characters: "Column Name"\n';
+  prompt += '5. Use CAST(column AS REAL) for numeric operations on text columns\n';
+  prompt += '6. Provide clear, natural language explanations of your findings\n';
+  prompt += "7. If multiple CSVs are available, clarify which one you're analyzing\n";
+  prompt += '8. Use LIMIT to avoid returning too many rows\n\n';
 
   prompt += 'Image Analysis:\n';
   prompt += '- Users can upload images (JPEG, PNG, WebP, GIF) along with their messages\n';
@@ -391,7 +400,8 @@ export function buildSystemPrompt(csvResourcesMetadata: CsvResourceMetadata[]): 
   prompt += '- If no CSV resources are available, inform the user and suggest uploading a CSV file\n';
   prompt += "- If the user's query is unclear, ask clarifying questions\n";
   prompt += "- Always provide context about which CSV file and columns you're analyzing\n";
-  prompt += '- Use filter_and_aggregate_csv_data when both filtering and aggregation are needed\n';
+  prompt += '- Prefer execute_sql_query over individual filter/aggregate tools - SQL is more flexible\n';
+  prompt += '- Use quoted identifiers for column names with spaces: "First Name" not First Name\n';
   prompt += '- Be concise but thorough in your analysis\n';
   prompt += '- When analyzing images, provide detailed descriptions and insights\n';
   prompt += '- If users upload images without text, analyze the images and describe what you see\n';
@@ -434,16 +444,20 @@ export async function loadCsvMetadata(
 
 The agent binds a suite of CSV tools implemented with `DynamicStructuredTool` and `zod` schemas. These are discoverable and callable by the LLM.
 
-```207:214:lib/langgraph/tools/csv-tools.ts
+```251:260:lib/langgraph/tools/csv-tools.ts
 export const csvTools = [
   loadCsvDataTool,
-  filterCsvRowsTool,
-  aggregateCsvDataTool,
-  filterAndAggregateCsvDataTool,
-  getCsvStatisticsTool,
-  searchCsvTextTool,
+  executeSqlQueryTool,
+  // Deprecated tools - replaced by execute_sql_query
+  // filterCsvRowsTool,        // Use: SELECT * FROM csv_data WHERE ...
+  // aggregateCsvDataTool,     // Use: SELECT SUM(column), AVG(column) FROM csv_data
+  // filterAndAggregateCsvDataTool, // Use: SELECT ... WHERE ... GROUP BY ...
+  // searchCsvTextTool,         // Use: SELECT * FROM csv_data WHERE column LIKE '%term%'
+  // getCsvStatisticsTool,      // Use SQL with aggregate functions and subqueries
 ];
 ```
+
+**Note**: The tool list has been simplified to focus on SQL-based analysis. The `execute_sql_query` tool replaces the individual filter, aggregate, search, and statistics tools, providing more flexibility and power through SQL queries. The `load_csv_data` tool is kept for convenience to inspect CSV schemas.
 
 Each tool validates inputs, calls into `csvAnalysisService`, and returns JSON-encoded results tailored for agent reasoning (often with limited rows for efficiency).
 

@@ -107,7 +107,29 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
     try {
       const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete session');
-      setSessions((prev) => prev.filter((s) => s.id !== id));
+
+      // Check if the deleted session was the currently selected one
+      const wasSelected = selectedSessionId === id;
+
+      // Update sessions list
+      const updatedSessions = sessions.filter((s) => s.id !== id);
+      setSessions(updatedSessions);
+
+      // If the deleted session was selected, handle selection
+      if (wasSelected) {
+        // Clear resources for the deleted session
+        setResources([]);
+
+        // Auto-select the first available session if any exist
+        if (updatedSessions.length > 0) {
+          setSelectedSessionId(updatedSessions[0].id);
+        } else {
+          // No sessions left, clear selection
+          setSelectedSessionId(null);
+        }
+      }
+
+      toast.success('Session deleted');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete session');
     }

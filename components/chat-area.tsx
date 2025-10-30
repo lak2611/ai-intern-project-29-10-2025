@@ -28,13 +28,22 @@ export function ChatArea() {
   useEffect(() => {
     if (!selectedSessionId) {
       setMessages([]);
+      setErrorMessage('');
       return;
     }
 
     const fetchMessages = async () => {
       try {
         const res = await fetch(`/api/sessions/${selectedSessionId}/messages`, { cache: 'no-store' });
-        if (!res.ok) throw new Error('Failed to load messages');
+        if (!res.ok) {
+          // If session not found (404), clear messages gracefully
+          if (res.status === 404) {
+            setMessages([]);
+            setErrorMessage('');
+            return;
+          }
+          throw new Error('Failed to load messages');
+        }
         const data = await res.json();
         const formattedMessages: Message[] = data.map((msg: any) => ({
           id: msg.id,
@@ -44,9 +53,14 @@ export function ChatArea() {
           images: msg.metadata?.images || undefined,
         }));
         setMessages(formattedMessages);
+        setErrorMessage(''); // Clear any previous errors
       } catch (err) {
         console.error('Error fetching messages:', err);
-        setErrorMessage(err instanceof Error ? err.message : 'Failed to load messages');
+        // Only show error if it's not a 404 (handled above)
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load messages';
+        setErrorMessage(errorMessage);
+        // Clear messages on error to avoid showing stale data
+        setMessages([]);
       }
     };
 
