@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resourceService } from '@/lib/resource-service';
 import { sessionService } from '@/lib/session-service';
+import { formatBytes } from '@/lib/utils';
 
 type RouteParams = { id: string };
 type RouteContext = { params: Promise<RouteParams> };
@@ -49,8 +50,12 @@ export const POST = async (req: Request, { params }: RouteContext) => {
       return NextResponse.json({ error: 'file is required' }, { status: 400 });
     }
 
-    if (file.size > Number(process.env.UPLOAD_MAX_BYTES || 20 * 1024 * 1024)) {
-      return NextResponse.json({ error: 'File too large' }, { status: 413 });
+    const maxBytes = Number(process.env.UPLOAD_MAX_BYTES || 20 * 1024 * 1024);
+    if (file.size > maxBytes) {
+      return NextResponse.json(
+        { error: `File too large: ${formatBytes(file.size)}. Maximum allowed size is ${formatBytes(maxBytes)}` },
+        { status: 413 }
+      );
     }
 
     const created = await resourceService.createFromUpload(id, file);

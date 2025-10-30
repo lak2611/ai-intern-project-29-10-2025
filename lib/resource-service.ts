@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { createResourceFromUploadSchema, allowedCsvMimeTypes } from './schemas/resource';
 import { deleteObject, getStream, putObject } from './storage/disk';
+import { formatBytes } from './utils';
 import Papa from 'papaparse';
 
 class ResourceService {
@@ -97,7 +98,7 @@ class ResourceService {
     const contentLength = response.headers.get('content-length');
 
     if (contentLength && Number(contentLength) > maxSize) {
-      throw new Error('File too large');
+      throw new Error(`File too large: ${formatBytes(Number(contentLength))}. Maximum allowed size is ${formatBytes(maxSize)}`);
     }
 
     // Extract filename from URL or use default
@@ -118,7 +119,7 @@ class ResourceService {
     const buffer = new Uint8Array(arrayBuffer);
 
     if (buffer.byteLength > maxSize) {
-      throw new Error('File too large');
+      throw new Error(`File too large: ${formatBytes(buffer.byteLength)}. Maximum allowed size is ${formatBytes(maxSize)}`);
     }
 
     // Validate CSV can be parsed

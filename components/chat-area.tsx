@@ -273,7 +273,7 @@ export function ChatArea() {
       {/* Header */}
       <div className="border-b border-border p-4 flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Project Analysis</h2>
+          <h2 className="text-lg font-semibold text-foreground">Khoi's Intern Project</h2>
           <p className="text-sm text-muted-foreground">{selectedSessionId ? 'Active session' : 'No session selected'}</p>
         </div>
         <div className="flex gap-2">

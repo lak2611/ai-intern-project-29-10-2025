@@ -6,6 +6,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { toast } from 'react-toastify';
 import { Session } from '@prisma/client';
 import { useSession } from './session-context';
+import { formatBytes } from '@/lib/utils';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -123,8 +124,9 @@ export function Sidebar({ isOpen, onToggle }: SidebarProps) {
     input.onchange = async () => {
       if (!input.files || input.files.length === 0 || !selectedSessionId) return;
       const file = input.files[0];
-      if (file.size > Number(process.env.NEXT_PUBLIC_UPLOAD_MAX_BYTES || 20 * 1024 * 1024)) {
-        toast.error('File too large');
+      const maxBytes = Number(process.env.NEXT_PUBLIC_UPLOAD_MAX_BYTES || 20 * 1024 * 1024);
+      if (file.size > maxBytes) {
+        toast.error(`File too large: ${formatBytes(file.size)}. Maximum allowed size is ${formatBytes(maxBytes)}`);
         return;
       }
       const form = new FormData();
