@@ -11,153 +11,422 @@ This document describes how the LangGraph-based agent is structured in this proj
   - Execution nodes: `lib/langgraph/nodes/*`
   - System prompt and CSV metadata loader: `lib/langgraph/system-prompt.ts`
   - CSV tools exposed to the LLM: `lib/langgraph/tools/*`
+  - Checkpointing for state persistence: `lib/langgraph/checkpointer.ts`
   - Service that runs and streams the graph: `lib/langgraph-agent-service.ts`
 
 ### High-level Data Flow
 
 1. A user sends a message (optionally with images) in a session.
 2. The `LangGraphAgentService` constructs the initial state and starts the graph with `streamEvents`.
-3. The graph runs three nodes in order:
-   - `loadCsvMetadata` → enrich state with CSV metadata
-   - `agent` → LLM reasoning with tools (may loop through tool calls)
-   - `saveMessage` → persist user and assistant messages
-4. While the `agent` node runs, token chunks are streamed back to the client.
+3. The graph runs nodes in a loop:
+   - `loadCsvMetadata` → enrich state with CSV metadata (runs once)
+   - `model` → LLM reasoning with tools (may loop through tool calls)
+   - `shouldContinue` → conditional routing based on tool calls
+   - `tools` → automatic tool execution via ToolNode (if needed)
+   - Loop back to `model` if tools were called, otherwise END
+4. While the `model` node runs, token chunks are streamed back to the client.
+5. State is automatically persisted after each node via the checkpointer.
 
 ### State Schema and Graph
 
-The graph uses an annotated state to define the shared data passed between nodes.
+The graph uses an annotated state to define the shared data passed between nodes. Messages use LangChain's `BaseMessage[]` with a reducer that appends new messages.
 
-```1:12:lib/langgraph/graph.ts
-import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
-import { loadCsvMetadataNode, agentNode, saveMessageNode } from './nodes';
-import { CsvResourceMetadata } from './agent-state';
-import { AgentMessage } from '@/lib/types/message';
-```
-
-```9:30:lib/langgraph/graph.ts
+```15:39:lib/langgraph/graph.ts
 const StateAnnotation = Annotation.Root({
-  sessionId: Annotation<string>({ reducer: (x, y) => y ?? x, default: () => '' }),
-  messages: Annotation<AgentMessage[]>({ reducer: (x, y) => y ?? x, default: () => [] }),
-  csvResourcesMetadata: Annotation<CsvResourceMetadata[]>({ reducer: (x, y) => y ?? x, default: () => [] }),
-  currentQuery: Annotation<string>({ reducer: (x, y) => y ?? x, default: () => '' }),
+  messages: Annotation<BaseMessage[]>({
+    reducer: (x: BaseMessage[], y: BaseMessage[]) => {
+      // MessagesAnnotation reducer: append new messages to existing ones
+      return [...(x || []), ...(y || [])];
+    },
+    default: () => [],
+  }),
+  sessionId: Annotation<string>({
+    reducer: (x: string, y: string) => y ?? x,
+    default: () => '',
+  }),
+  csvResourcesMetadata: Annotation<CsvResourceMetadata[]>({
+    reducer: (x: CsvResourceMetadata[], y: CsvResourceMetadata[]) => y ?? x,
+    default: () => [],
+  }),
+  currentQuery: Annotation<string>({
+    reducer: (x: string, y: string) => y ?? x,
+    default: () => '',
+  }),
   currentQueryImages: Annotation<Array<{ data: string; mimeType: string }>>({
-    reducer: (x, y) => y ?? x,
+    reducer: (x: Array<{ data: string; mimeType: string }>, y: Array<{ data: string; mimeType: string }> | undefined) => y ?? x,
     default: () => [],
   }),
 });
 ```
 
-```35:45:lib/langgraph/graph.ts
+```45:62:lib/langgraph/graph.ts
 export function initializeGraph() {
+  const toolNode = new ToolNode(csvTools, {
+    handleToolErrors: true,
+  });
+
   return new StateGraph(StateAnnotation)
     .addNode('loadCsvMetadata', loadCsvMetadataNode)
-    .addNode('agent', agentNode)
-    .addNode('saveMessage', saveMessageNode)
+    .addNode('model', modelNode)
+    .addNode('tools', toolNode)
     .addEdge(START, 'loadCsvMetadata')
-    .addEdge('loadCsvMetadata', 'agent')
-    .addEdge('agent', 'saveMessage')
-    .addEdge('saveMessage', END)
-    .compile();
+    .addEdge('loadCsvMetadata', 'model')
+    .addConditionalEdges('model', shouldContinue, {
+      tools: 'tools',
+      [END as string]: END, // Directly end - checkpointing handles persistence
+    })
+    .addEdge('tools', 'model') // Loop back to model after tools
+    .compile({ checkpointer });
 }
 ```
 
-The reducer for each field is set to "last writer wins" (`y ?? x`) so nodes can update parts of the state without merging.
+Key differences from a simple linear flow:
 
-### Agent State Types and Guards
+- **Messages reducer**: Appends new messages (`[...x, ...y]`) instead of "last writer wins", allowing conversation history to accumulate.
+- **Conditional routing**: After the `model` node, `shouldContinue` checks if tool calls were made and routes accordingly.
+- **ToolNode**: Uses LangGraph's built-in `ToolNode` for automatic tool execution, eliminating manual tool call handling.
+- **Checkpointing**: The graph is compiled with a checkpointer that automatically persists state after each node execution.
 
-The strongly-typed state passed through the graph is defined in `agent-state.ts` with lightweight runtime guards for safety.
+### Agent State Types
 
-```13:31:lib/langgraph/agent-state.ts
+The strongly-typed state passed through the graph is defined in `agent-state.ts` with runtime guards for safety.
+
+```14:32:lib/langgraph/agent-state.ts
 export interface CsvResourceMetadata {
+  /** Unique identifier for the resource */
   id: string;
+
+  /** Original filename when uploaded */
   originalName: string;
+
+  /** Path where the file is stored on disk */
   storedPath: string;
+
+  /** File size in bytes */
   sizeBytes: number;
+
+  /** Column names extracted from CSV header (optional, loaded on-demand) */
   columns?: string[];
+
+  /** Total number of rows in the CSV (optional, loaded on-demand) */
   rowCount?: number;
 }
 ```
 
-```41:59:lib/langgraph/agent-state.ts
+```43:61:lib/langgraph/agent-state.ts
 export interface AgentState {
+  /** Session ID for this conversation */
   sessionId: string;
-  messages: AgentMessage[];
+
+  /** Conversation history (all previous messages) - now uses LangChain BaseMessage[] */
+  messages: BaseMessage[];
+
+  /** Metadata for CSV resources available in this session */
   csvResourcesMetadata: CsvResourceMetadata[];
+
+  /** Current user query being processed */
   currentQuery: string;
-  currentQueryImages?: Array<{ data: string; mimeType: string }>;
+
+  /** Optional images for current query (multimodal input) */
+  currentQueryImages?: Array<{
+    data: string; // base64 string
+    mimeType: string;
+  }>;
 }
 ```
+
+**Important**: The `messages` field uses LangChain's `BaseMessage[]` instead of a custom `AgentMessage[]`. This enables:
+
+- Automatic serialization/deserialization by the checkpointer
+- Native tool call support
+- Integration with LangChain's message handling
 
 ### Nodes
 
-1. Load CSV Metadata (`loadCsvMetadataNode`)
+1. **Load CSV Metadata** (`loadCsvMetadataNode`)
 
-```9:21:lib/langgraph/nodes/load-csv-metadata-node.ts
+```9:38:lib/langgraph/nodes/load-csv-metadata-node.ts
 export async function loadCsvMetadataNode(state: AgentState): Promise<Partial<AgentState>> {
-  const resources = await resourceService.listBySession(state.sessionId);
-  const csvResources = resources.filter(
-    (r: any) => r.mimeType === 'text/csv' || r.mimeType === 'application/csv' || r.originalName.toLowerCase().endsWith('.csv')
-  );
-  const csvMetadata = await loadCsvMetadata(
-    csvResources.map((r: any) => ({ id: r.id, storedPath: r.storedPath, originalName: r.originalName, sizeBytes: r.sizeBytes }))
-  );
-  return { csvResourcesMetadata: csvMetadata };
+  try {
+    // Fetch all CSV resources for the session
+    const resources = await resourceService.listBySession(state.sessionId);
+
+    // Filter to CSV files only
+    const csvResources = resources.filter(
+      (r: any) => r.mimeType === 'text/csv' || r.mimeType === 'application/csv' || r.originalName.toLowerCase().endsWith('.csv')
+    );
+
+    // Load CSV metadata (columns, row count)
+    const csvMetadata = await loadCsvMetadata(
+      csvResources.map((r: any) => ({
+        id: r.id,
+        storedPath: r.storedPath,
+        originalName: r.originalName,
+        sizeBytes: r.sizeBytes,
+      }))
+    );
+
+    return {
+      csvResourcesMetadata: csvMetadata,
+    };
+  } catch (error: any) {
+    console.error('Error loading CSV metadata:', error);
+    return {
+      csvResourcesMetadata: [],
+    };
+  }
 }
 ```
 
-2. Agent (`agentNode`)
+This node runs once at the start of each graph execution to populate CSV metadata.
 
-```12:26:lib/langgraph/nodes/agent-node.ts
-export async function agentNode(state: AgentState): Promise<Partial<AgentState>> {
+2. **Model** (`modelNode`)
+
+```12:114:lib/langgraph/nodes/model-node.ts
+export async function modelNode(state: AgentState): Promise<Partial<AgentState>> {
   const apiKey = process.env.GOOGLE_API_KEY || process.env.LLM_API_KEY;
   const modelName = process.env.LLM_MODEL || 'gemini-2.5-flash';
-  const llm = new ChatGoogleGenerativeAI({ model: modelName, temperature: 0, apiKey, streaming: true }).bindTools(csvTools);
+
+  if (!apiKey) {
+    throw new Error('GOOGLE_API_KEY or LLM_API_KEY environment variable is required');
+  }
+
+  const llm = new ChatGoogleGenerativeAI({
+    model: modelName,
+    temperature: 0,
+    apiKey: apiKey,
+    streaming: true, // Enable streaming for token-by-token responses
+  }).bindTools(csvTools);
+
+  // Build system prompt with CSV resource information
   const systemPrompt = buildSystemPrompt(state.csvResourcesMetadata);
-  const langchainMessages = [ new SystemMessage(systemPrompt), .../* prior messages */, /* current query (with optional images) */ ];
-  // Tool-call loop (max 5 iterations) then return updated messages
+
+  // Build message array: system prompt + history + current query
+  const langchainMessages = [
+    new SystemMessage(systemPrompt),
+    ...state.messages, // History already contains LangChain messages
+  ];
+
+  // Add current query to messages if present (only on first call, not when looping from tools)
+  let currentQueryMessage: HumanMessage | null = null;
+  if (state.currentQuery) {
+    const timestamp = new Date().toISOString();
+    currentQueryMessage =
+      state.currentQueryImages && state.currentQueryImages.length > 0
+        ? (() => {
+            // ... handle images ...
+            return new HumanMessage({
+              content: [/* text + images */],
+              additional_kwargs: { timestamp },
+            });
+          })()
+        : new HumanMessage({
+            content: state.currentQuery || '',
+            additional_kwargs: { timestamp },
+          });
+
+    langchainMessages.push(currentQueryMessage);
+  }
+
+  // Invoke LLM - ToolNode will handle tool execution automatically
+  const response = await llm.invoke(langchainMessages);
+
+  // Add timestamp to AI response
+  const aiMessageWithTimestamp = new AIMessage({
+    content: response.content,
+    tool_calls: response.tool_calls,
+    additional_kwargs: {
+      ...response.additional_kwargs,
+      timestamp: new Date().toISOString(),
+    },
+  });
+
+  // Return the HumanMessage (for current query) + AIMessage (response)
+  // Clear currentQuery after processing
+  const messagesToAdd = currentQueryMessage ? [currentQueryMessage, aiMessageWithTimestamp] : [aiMessageWithTimestamp];
+
+  return {
+    messages: messagesToAdd, // Append HumanMessage + AIMessage to state (MessagesAnnotation handles merging)
+    currentQuery: '', // Clear current query after processing
+    currentQueryImages: [], // Clear images after processing
+  };
 }
 ```
 
-The `agent` node:
+The `model` node:
 
 - Builds a system prompt customized with available CSVs.
-- Converts chat history and the current query (including images) into LangChain messages.
-- Invokes the LLM with bound CSV tools and iterates through tool calls until a final response is produced.
-- Appends the user message and assistant response to the state `messages`.
+- Converts conversation history (from checkpoints) and the current query (including images) into LangChain messages.
+- Invokes the LLM with bound CSV tools.
+- Returns the user message (if first call) and AI response, clearing `currentQuery`.
+- May include `tool_calls` in the AI response, which triggers routing to the `tools` node.
 
-3. Save Message (`saveMessageNode`)
+3. **Should Continue** (`shouldContinue`)
 
-```8:20:lib/langgraph/nodes/save-message-node.ts
-export async function saveMessageNode(state: AgentState): Promise<Partial<AgentState>> {
-  const messagesToSave = state.messages.slice(-2);
-  for (const msg of messagesToSave) {
-    const existing = await (prisma as any).message.findFirst({ where: { sessionId: state.sessionId, role: msg.role, content: msg.content } });
-    if (!existing) {
-      const metadata = msg.images && msg.images.length > 0 ? { images: msg.images } : null;
-      await (prisma as any).message.create({ data: { sessionId: state.sessionId, role: msg.role, content: msg.content, metadata } });
-    }
+```8:22:lib/langgraph/nodes/should-continue.ts
+export function shouldContinue(state: { messages: any[] }): 'tools' | typeof END {
+  const { messages } = state;
+  if (!messages || messages.length === 0) {
+    return END;
   }
-  await (prisma as any).session.update({ where: { id: state.sessionId }, data: { updatedAt: new Date() } });
-  return {};
+
+  const lastMessage = messages[messages.length - 1];
+
+  // Check if last message is AIMessage with tool calls
+  if (lastMessage instanceof AIMessage && lastMessage.tool_calls && lastMessage.tool_calls.length > 0) {
+    return 'tools';
+  }
+
+  return END;
 }
 ```
+
+This conditional routing function checks if the last AI message contains tool calls. If yes, routes to `tools`; otherwise, ends the graph.
+
+4. **Tools** (`toolNode`)
+
+The `tools` node is a prebuilt `ToolNode` from LangGraph that:
+
+- Automatically executes tool calls from the last AI message
+- Handles tool errors gracefully
+- Returns tool results as `ToolMessage` instances
+- Appends tool results to the state messages
+
+After tools execute, the graph loops back to `model` so the LLM can process the tool results.
+
+### Checkpointing
+
+The graph uses `SqliteSaver` from `@langchain/langgraph-checkpoint-sqlite` for automatic state persistence:
+
+```23:47:lib/langgraph/checkpointer.ts
+function getCheckpointer(): SqliteSaver {
+  if (!checkpointerInstance) {
+    // Lazy import to avoid loading native module at module load time
+    // Use dynamic require to delay loading until actually needed
+    const Database = require('better-sqlite3');
+    const dbPath = path.join(process.cwd(), 'checkpoints.sqlite');
+    const db = new Database(dbPath);
+    // SqliteSaver constructor takes a Database instance
+    checkpointerInstance = new SqliteSaver(db);
+  }
+  return checkpointerInstance;
+}
+
+// Create a proxy that delegates all calls to the actual checkpointer instance
+export const checkpointer = new Proxy({} as SqliteSaver, {
+  get(_target, prop) {
+    const instance = getCheckpointer();
+    const value = (instance as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(instance);
+    }
+    return value;
+  },
+}) as SqliteSaver;
+```
+
+**Key features**:
+
+- **Separate database**: Uses `checkpoints.sqlite` (separate from Prisma's database) to avoid conflicts
+- **Lazy initialization**: Uses a proxy pattern to delay loading `better-sqlite3` until needed (important for Next.js)
+- **Automatic persistence**: State is saved after each node execution
+- **Thread-based**: Uses `sessionId` as `thread_id` to maintain separate conversation histories
+
+**Message persistence**: Messages are automatically saved to checkpoints after each node. There is no separate `saveMessage` node—the checkpointer handles all persistence.
 
 ### System Prompt and Metadata Loading
 
-`system-prompt.ts` both builds the system prompt (listing available CSVs and tool usage guidance) and provides `loadCsvMetadata`, which enriches resource entries with columns and row counts via the CSV analysis service.
+`system-prompt.ts` builds the system prompt (listing available CSVs and tool usage guidance) and provides `loadCsvMetadata`, which enriches resource entries with columns and row counts via the CSV analysis service.
 
-```18:27:lib/langgraph/system-prompt.ts
+```18:76:lib/langgraph/system-prompt.ts
 export function buildSystemPrompt(csvResourcesMetadata: CsvResourceMetadata[]): string {
   let prompt = 'You are a helpful AI assistant that can analyze CSV files and images. ';
-  // ... adds per-resource details and tool guidelines ...
+  prompt += 'You have access to CSV analysis tools to help users understand their data. ';
+  prompt += 'You can also analyze images that users upload with their messages using your vision capabilities.\n\n';
+
+  if (csvResourcesMetadata.length === 0) {
+    prompt += 'No CSV resources are currently available in this session.\n';
+    prompt += 'If the user asks about CSV data, inform them that no CSV files have been uploaded yet.\n';
+  } else {
+    prompt += `The current session has ${csvResourcesMetadata.length} CSV resource(s) available:\n\n`;
+
+    csvResourcesMetadata.forEach((resource, index) => {
+      prompt += `[CSV Resource ${index + 1}]\n`;
+      prompt += `- ID: ${resource.id}\n`;
+      prompt += `- Filename: ${resource.originalName}\n`;
+      prompt += `- Size: ${formatBytes(resource.sizeBytes)}\n`;
+      if (resource.columns && resource.columns.length > 0) {
+        prompt += `- Columns: ${resource.columns.join(', ')}\n`;
+      }
+      if (resource.rowCount !== undefined) {
+        prompt += `- Row Count: ${resource.rowCount.toLocaleString()}\n`;
+      }
+      prompt += `\n`;
+    });
+  }
+
+  prompt += '\nYou have access to the following CSV analysis tools:\n';
+  prompt += '- load_csv_data: Load and parse a CSV file (use this first when analyzing data)\n';
+  prompt += '- filter_csv_rows: Filter rows based on conditions\n';
+  prompt += '- aggregate_csv_data: Perform calculations (sum, avg, count, min, max, group_by)\n';
+  prompt += '- filter_and_aggregate_csv_data: Combine filtering and aggregation efficiently\n';
+  prompt += '- get_csv_statistics: Get descriptive statistics for numeric columns\n';
+  prompt += '- search_csv_text: Search for text patterns in CSV data\n';
+
+  prompt += 'When a user asks about CSV data:\n';
+  prompt += '1. Identify which CSV file(s) are relevant from the list above\n';
+  prompt += '2. Use the appropriate tools to analyze the data\n';
+  prompt += '3. Provide clear, natural language explanations of your findings\n';
+  prompt += "4. If multiple CSVs are available, clarify which one you're analyzing\n";
+  prompt += '5. For large files, use the limit parameter to avoid loading everything\n\n';
+
+  prompt += 'Image Analysis:\n';
+  prompt += '- Users can upload images (JPEG, PNG, WebP, GIF) along with their messages\n';
+  prompt += '- You can analyze images using your vision capabilities to understand their content\n';
+  prompt += '- When images are provided, describe what you see and answer questions about the images\n';
+  prompt += '- You can combine image analysis with CSV data analysis if both are relevant\n';
+  prompt += '- If multiple images are provided, analyze each one and note relationships between them\n\n';
+
+  prompt += 'Important guidelines:\n';
+  prompt += '- If no CSV resources are available, inform the user and suggest uploading a CSV file\n';
+  prompt += "- If the user's query is unclear, ask clarifying questions\n";
+  prompt += "- Always provide context about which CSV file and columns you're analyzing\n";
+  prompt += '- Use filter_and_aggregate_csv_data when both filtering and aggregation are needed\n';
+  prompt += '- Be concise but thorough in your analysis\n';
+  prompt += '- When analyzing images, provide detailed descriptions and insights\n';
+  prompt += '- If users upload images without text, analyze the images and describe what you see\n';
+
   return prompt;
 }
 ```
 
-```82:109:lib/langgraph/system-prompt.ts
-export async function loadCsvMetadata(resources: Array<{ id: string; storedPath: string; originalName: string; sizeBytes: number }>): Promise<CsvResourceMetadata[]> {
-  const schema = await csvAnalysisService.getCsvSchema(resource.id);
-  // ... returns metadata including columns and rowCount when available ...
+```81:107:lib/langgraph/system-prompt.ts
+export async function loadCsvMetadata(
+  resources: Array<{ id: string; storedPath: string; originalName: string; sizeBytes: number }>
+): Promise<CsvResourceMetadata[]> {
+  const metadataPromises = resources.map(async (resource) => {
+    try {
+      const schema = await csvAnalysisService.getCsvSchema(resource.id);
+      return {
+        id: resource.id,
+        originalName: resource.originalName,
+        storedPath: resource.storedPath,
+        sizeBytes: resource.sizeBytes,
+        columns: schema.columns,
+        rowCount: schema.rowCount,
+      };
+    } catch (error) {
+      // If schema loading fails, return basic metadata
+      return {
+        id: resource.id,
+        originalName: resource.originalName,
+        storedPath: resource.storedPath,
+        sizeBytes: resource.sizeBytes,
+      };
+    }
+  });
+
+  return Promise.all(metadataPromises);
 }
 ```
 
@@ -165,7 +434,7 @@ export async function loadCsvMetadata(resources: Array<{ id: string; storedPath:
 
 The agent binds a suite of CSV tools implemented with `DynamicStructuredTool` and `zod` schemas. These are discoverable and callable by the LLM.
 
-```272:281:lib/langgraph/tools/csv-tools.ts
+```207:214:lib/langgraph/tools/csv-tools.ts
 export const csvTools = [
   loadCsvDataTool,
   filterCsvRowsTool,
@@ -173,7 +442,6 @@ export const csvTools = [
   filterAndAggregateCsvDataTool,
   getCsvStatisticsTool,
   searchCsvTextTool,
-  compareCsvDataTool,
 ];
 ```
 
@@ -183,24 +451,141 @@ Each tool validates inputs, calls into `csvAnalysisService`, and returns JSON-en
 
 `LangGraphAgentService` owns a compiled graph instance and provides `streamAgent(sessionId, userMessage, images?)` to:
 
-- Validate the session and load prior messages
-- Build initial `AgentState`
-- Persist the new user message immediately
+- Validate the session
+- Build initial `AgentState` (messages are loaded from checkpoint automatically)
 - Start the graph with `streamEvents` and yield token chunks as they arrive
 
-```16:33:lib/langgraph-agent-service.ts
-export class LangGraphAgentService {
-  private graph = initializeGraph();
-  async *streamAgent(sessionId: string, userMessage: string, images?: Array<{ data: string; mimeType: string; originalName: string }>) {
-    const session = await sessionService.getById(sessionId);
-    const history = await messageService.listBySession(sessionId);
-    const initialState: AgentState = { sessionId, messages, csvResourcesMetadata: [], currentQuery: userMessage, currentQueryImages: images?.map(...) };
-    // persist user message then stream graph events
+```23:88:lib/langgraph-agent-service.ts
+async *streamAgent(
+  sessionId: string,
+  userMessage: string,
+  images?: Array<{ data: string; mimeType: string; originalName: string }>
+): AsyncGenerator<string> {
+  // Validate session exists
+  const session = await sessionService.getById(sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+
+  // Initialize state - LangGraph will load messages from checkpoint if it exists
+  // If no checkpoint exists, messages will be empty (new session)
+  const initialState: AgentState = {
+    sessionId,
+    messages: [], // Messages are loaded from checkpoint automatically by LangGraph
+    csvResourcesMetadata: [],
+    currentQuery: userMessage,
+    currentQueryImages: images?.map((img) => ({
+      data: img.data,
+      mimeType: img.mimeType,
+    })),
+  };
+
+  // User message is now included in initial state and persisted automatically via checkpointer
+  // No need to manually create it
+
+  // Stream the graph execution with events to get token-level streaming
+  const stream = this.graph.streamEvents(initialState, {
+    version: 'v2',
+    configurable: {
+      thread_id: sessionId, // Use sessionId as thread_id for checkpointing
+    },
+  });
+
+  let accumulatedContent = '';
+
+  for await (const event of stream) {
+    // Handle streaming events from LangGraph
+    // Stream LLM token chunks
+    if (event.event === 'on_chat_model_stream') {
+      const chunk = event.data?.chunk;
+      if (chunk?.content) {
+        const content = typeof chunk.content === 'string' ? chunk.content : '';
+        if (content) {
+          accumulatedContent += content;
+          yield content;
+        }
+      }
+    } else if (event.event === 'on_chat_model_end') {
+      // Final message from LLM - check if there's any remaining content
+      const message = event.data?.output;
+      if (message?.content) {
+        const content = typeof message.content === 'string' ? message.content : '';
+        if (content && content !== accumulatedContent) {
+          // Yield any remaining content that wasn't streamed
+          const remaining = content.slice(accumulatedContent.length);
+          if (remaining) {
+            accumulatedContent = content;
+            yield remaining;
+          }
+        }
+      }
+    }
   }
 }
 ```
 
-Streaming is handled by listening for `on_chat_model_stream` events and yielding incremental content, then reconciling any remaining delta upon `on_chat_model_end`.
+**Key points**:
+
+- Messages are automatically loaded from checkpoints using `thread_id: sessionId`
+- No manual message persistence needed—checkpointer handles it
+- Streaming listens for `on_chat_model_stream` events and yields incremental content
+
+### Message Service
+
+The `messageService` loads messages from LangGraph checkpoints (not Prisma):
+
+```136:177:lib/message-service.ts
+listBySession = async (sessionId: string) => {
+  try {
+    const checkpoint = await checkpointer.get({
+      configurable: { thread_id: sessionId },
+    });
+
+    if (checkpoint && checkpoint.channel_values.messages) {
+      const messages = checkpoint.channel_values.messages as any[];
+
+      // Filter and convert LangChain messages to API-compatible format
+      // Filter out AI messages that only have tool calls but no text content
+      return messages
+        .filter(isMessageType)
+        .filter((message) => !shouldFilterAIMessage(message))
+        .map((message, index) => {
+          const role = getMessageType(message);
+          if (!role) {
+            // This should never happen since we filtered with isMessageType, but handle it safely
+            throw new Error(`Invalid message type at index ${index}`);
+          }
+
+          const content = extractContent(message);
+          const images = role === 'user' ? extractImages(message) : undefined;
+          const timestamp = extractTimestamp(message);
+
+          return {
+            id: `msg-${sessionId}-${index}`,
+            sessionId,
+            role,
+            content,
+            createdAt: timestamp,
+            metadata: images ? { images } : null,
+          };
+        });
+    }
+  } catch (error) {
+    console.error('Error loading from checkpoints:', error);
+  }
+
+  // Return empty array if no checkpoint or messages found
+  return [];
+};
+```
+
+The service:
+
+- Reads from checkpoints using `thread_id` (sessionId)
+- Converts LangChain `BaseMessage` objects to API-compatible format
+- Filters out AI messages that only contain tool calls (no text content)
+- Extracts images from `HumanMessage` content arrays
+- Extracts timestamps from `additional_kwargs`
 
 ### Environment Variables
 
@@ -209,10 +594,11 @@ Streaming is handled by listening for `on_chat_model_stream` events and yielding
 
 ### Extensibility
 
-- **Add a new tool**: implement a `DynamicStructuredTool` with a `zod` schema in `lib/langgraph/tools`, export it via `index.ts`, and it will be available once bound in `agent-node`.
+- **Add a new tool**: implement a `DynamicStructuredTool` with a `zod` schema in `lib/langgraph/tools`, export it via `index.ts`, and add it to the `csvTools` array. It will be automatically bound in `modelNode`.
 - **Add a new node**: create a function with signature `(state: AgentState) => Promise<Partial<AgentState>>` and wire it into `initializeGraph()` with appropriate edges.
 - **Change state shape**: update `AgentState` and the `StateAnnotation` in `graph.ts` to include the new field.
 - **Customize system prompt**: edit `buildSystemPrompt` to reflect new tools or behaviors.
+- **Modify checkpointing**: adjust `checkpointer.ts` to use a different storage backend (e.g., Redis, Postgres).
 
 ### Related Docs
 

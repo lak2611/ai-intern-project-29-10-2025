@@ -36,7 +36,6 @@ export async function POST(req: Request, { params }: RouteContext) {
           // Stream the agent response with images
           for await (const chunk of langGraphAgentService.streamAgent(id, parsed.content, metadata?.images)) {
             const data = `data: ${JSON.stringify({ content: chunk })}\n\n`;
-            console.log('🚀 ~ POST ~ data:', data);
             controller.enqueue(encoder.encode(data));
           }
 

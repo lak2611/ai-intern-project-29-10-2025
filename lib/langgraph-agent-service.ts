@@ -1,7 +1,7 @@
 import { initializeGraph } from './langgraph/graph';
 import { AgentState } from './langgraph/agent-state';
 import { sessionService } from './session-service';
-import { messageService } from './message-service';
+import { checkpointer } from './langgraph/checkpointer';
 
 export interface AgentResponse {
   message: {
@@ -31,27 +31,11 @@ export class LangGraphAgentService {
       throw new Error(`Session not found: ${sessionId}`);
     }
 
-    // Load conversation history
-    const history = await messageService.listBySession(sessionId);
-    const messages = history.map((msg: any) => {
-      const message: any = {
-        role: msg.role as 'user' | 'assistant' | 'system',
-        content: msg.content,
-      };
-      // Extract images from metadata if present
-      if (msg.metadata && msg.metadata.images && Array.isArray(msg.metadata.images)) {
-        message.images = msg.metadata.images.map((img: any) => ({
-          data: img.data,
-          mimeType: img.mimeType,
-        }));
-      }
-      return message;
-    });
-
-    // Initialize state
+    // Initialize state - LangGraph will load messages from checkpoint if it exists
+    // If no checkpoint exists, messages will be empty (new session)
     const initialState: AgentState = {
       sessionId,
-      messages,
+      messages: [], // Messages are loaded from checkpoint automatically by LangGraph
       csvResourcesMetadata: [],
       currentQuery: userMessage,
       currentQueryImages: images?.map((img) => ({
@@ -60,25 +44,15 @@ export class LangGraphAgentService {
       })),
     };
 
-    // Create user message with images if provided
-    if (images && images.length > 0) {
-      await messageService.create({
-        sessionId,
-        role: 'user',
-        content: userMessage,
-        metadata: { images },
-      });
-    } else {
-      await messageService.create({
-        sessionId,
-        role: 'user',
-        content: userMessage,
-      });
-    }
+    // User message is now included in initial state and persisted automatically via checkpointer
+    // No need to manually create it
 
     // Stream the graph execution with events to get token-level streaming
     const stream = this.graph.streamEvents(initialState, {
       version: 'v2',
+      configurable: {
+        thread_id: sessionId, // Use sessionId as thread_id for checkpointing
+      },
     });
 
     let accumulatedContent = '';

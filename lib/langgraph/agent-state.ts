@@ -5,6 +5,7 @@
  * including the main AgentState interface and CsvResourceMetadata type.
  */
 
+import { BaseMessage } from '@langchain/core/messages';
 import { AgentMessage } from '@/lib/types/message';
 
 /**
@@ -35,15 +36,16 @@ export interface CsvResourceMetadata {
  *
  * This state is passed between nodes in the LangGraph execution flow:
  * 1. loadCsvMetadataNode - populates csvResourcesMetadata
- * 2. agentNode - uses all state to process user query
- * 3. saveMessageNode - persists messages to database
+ * 2. modelNode - uses all state to process user query
+ * 3. toolsNode - executes tool calls automatically
+ * 4. Checkpointer automatically persists state after each node
  */
 export interface AgentState {
   /** Session ID for this conversation */
   sessionId: string;
 
-  /** Conversation history (all previous messages) */
-  messages: AgentMessage[];
+  /** Conversation history (all previous messages) - now uses LangChain BaseMessage[] */
+  messages: BaseMessage[];
 
   /** Metadata for CSV resources available in this session */
   csvResourcesMetadata: CsvResourceMetadata[];
