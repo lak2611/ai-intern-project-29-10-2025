@@ -187,13 +187,6 @@ export function ChatArea() {
     }
   };
 
-  const handleInterrupt = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-      setIsStreaming(false);
-    }
-  };
-
   const handleUpload = (type: 'image' | 'csv') => {
     if (type === 'image') {
       fileInputRef.current?.click();
@@ -357,14 +350,6 @@ export function ChatArea() {
             >
               <Send size={18} />
               <span className="hidden sm:inline">Send</span>
-            </button>
-            <button
-              onClick={handleInterrupt}
-              disabled={!isStreaming}
-              className="px-4 py-3 bg-error/20 hover:bg-error/30 text-error rounded-lg transition-colors font-medium flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Square size={18} />
-              <span className="hidden sm:inline">Stop</span>
             </button>
           </div>
         </div>

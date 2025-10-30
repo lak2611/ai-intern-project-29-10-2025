@@ -1,6 +1,7 @@
 import { prisma } from './prisma';
 import { createResourceFromUploadSchema, allowedCsvMimeTypes } from './schemas/resource';
 import { deleteObject, getStream, putObject } from './storage/disk';
+import Papa from 'papaparse';
 
 class ResourceService {
   listBySession = async (sessionId: string) => {
@@ -9,6 +10,31 @@ class ResourceService {
 
   getById = async (id: string) => {
     return (prisma as any).resource.findUnique({ where: { id } });
+  };
+
+  private validateCsvParsing = async (buffer: Uint8Array): Promise<void> => {
+    try {
+      const textContent = new TextDecoder().decode(buffer);
+      await new Promise<void>((resolve, reject) => {
+        Papa.parse(textContent, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results: Papa.ParseResult<any>) => {
+            if (results.errors.length > 0) {
+              reject(new Error(`CSV parsing errors: ${results.errors.map((e: Papa.ParseError) => e.message).join(', ')}`));
+              return;
+            }
+            // If we have data or no critical errors, consider it valid
+            resolve();
+          },
+          error: (error: Error) => {
+            reject(new Error(`Failed to parse CSV: ${error.message}`));
+          },
+        });
+      });
+    } catch (error: any) {
+      throw new Error(`Invalid CSV file: ${error.message}`);
+    }
   };
 
   createFromUpload = async (sessionId: string, file: File) => {
@@ -20,6 +46,9 @@ class ResourceService {
     const originalName = file.name || 'upload.csv';
     const mimeType = (file.type || 'text/csv') as (typeof allowedCsvMimeTypes)[number] | string;
     const sizeBytes = buffer.byteLength;
+
+    // Validate CSV can be parsed
+    await this.validateCsvParsing(buffer);
 
     const parsed = createResourceFromUploadSchema.parse({
       sessionId,
@@ -71,6 +100,20 @@ class ResourceService {
       throw new Error('File too large');
     }
 
+    // Extract filename from URL or use default
+    const urlPath = parsedUrl.pathname;
+    const originalName = urlPath.split('/').pop() || 'download.csv';
+
+    // Validate filename extension
+    if (!originalName.toLowerCase().endsWith('.csv')) {
+      throw new Error('URL must point to a CSV file (.csv extension required)');
+    }
+
+    // Validate content-type
+    if (!allowedCsvMimeTypes.includes(contentType as any)) {
+      throw new Error(`URL must point to a CSV file (content-type must be one of: ${allowedCsvMimeTypes.join(', ')})`);
+    }
+
     const arrayBuffer = await response.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
@@ -78,17 +121,16 @@ class ResourceService {
       throw new Error('File too large');
     }
 
-    // Extract filename from URL or use default
-    const urlPath = parsedUrl.pathname;
-    const originalName = urlPath.split('/').pop() || 'download.csv';
-    const fileName = originalName.endsWith('.csv') ? originalName : `${originalName.split('.')[0] || 'download'}.csv`;
+    // Validate CSV can be parsed
+    await this.validateCsvParsing(buffer);
 
-    const mimeType = (allowedCsvMimeTypes.includes(contentType as any) ? contentType : 'text/csv') as (typeof allowedCsvMimeTypes)[number] | string;
+    const fileName = originalName;
+    const mimeType = contentType as (typeof allowedCsvMimeTypes)[number];
 
     const parsed = createResourceFromUploadSchema.parse({
       sessionId,
       originalName: fileName,
-      mimeType: (allowedCsvMimeTypes.includes(mimeType as any) ? mimeType : 'text/csv') as any,
+      mimeType,
       sizeBytes: buffer.byteLength,
     });
 
