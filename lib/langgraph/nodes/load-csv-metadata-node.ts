@@ -1,12 +1,12 @@
 import { resourceService } from '../../resource-service';
 import { loadCsvMetadata } from '../system-prompt';
+import type { AgentState } from '../agent-state';
 
 /**
  * Node: Load CSV Metadata
  * Fetches CSV resources and loads their metadata (columns, row count)
  */
-export async function loadCsvMetadataNode(state: any): Promise<any> {
-  console.log('🚀 ~ loadCsvMetadataNode ~ state:', state);
+export async function loadCsvMetadataNode(state: AgentState): Promise<Partial<AgentState>> {
   try {
     // Fetch all CSV resources for the session
     const resources = await resourceService.listBySession(state.sessionId);

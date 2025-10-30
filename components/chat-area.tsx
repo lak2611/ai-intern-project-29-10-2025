@@ -1,21 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { Send, Square, Upload, ImageIcon, X } from 'lucide-react';
+import { Message } from '@/lib/types/message';
+import { ImageIcon, Send, Square, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { ChatMessages } from './chat-messages';
-import { LoadingState } from './loading-state';
-import { ErrorState } from './error-state';
 import { useSession } from './session-context';
-
-type ViewState = 'chat' | 'loading' | 'error-global' | 'error-ai';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  images?: Array<{ data: string; mimeType: string; originalName: string }>;
-}
 
 interface SelectedImage {
   file: File;
@@ -24,7 +13,6 @@ interface SelectedImage {
 
 export function ChatArea() {
   const { selectedSessionId } = useSession();
-  const [viewState, setViewState] = useState<ViewState>('chat');
   const [errorMessage, setErrorMessage] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -50,7 +38,7 @@ export function ChatArea() {
         const data = await res.json();
         const formattedMessages: Message[] = data.map((msg: any) => ({
           id: msg.id,
-          role: msg.role as 'user' | 'assistant',
+          role: msg.role as 'user' | 'assistant' | 'system',
           content: msg.content,
           timestamp: new Date(msg.createdAt),
           images: msg.metadata?.images || undefined,
@@ -59,7 +47,6 @@ export function ChatArea() {
       } catch (err) {
         console.error('Error fetching messages:', err);
         setErrorMessage(err instanceof Error ? err.message : 'Failed to load messages');
-        setViewState('error-global');
       }
     };
 
@@ -161,7 +148,7 @@ export function ChatArea() {
                 const data = await res.json();
                 const formattedMessages: Message[] = data.map((msg: any) => ({
                   id: msg.id,
-                  role: msg.role as 'user' | 'assistant',
+                  role: msg.role as 'user' | 'assistant' | 'system',
                   content: msg.content,
                   timestamp: new Date(msg.createdAt),
                   images: msg.metadata?.images || undefined,
@@ -191,7 +178,6 @@ export function ChatArea() {
         setMessages((prev) => prev.filter((msg) => msg.id !== assistantMsgId));
       } else {
         setErrorMessage(error.message || 'Failed to send message');
-        setViewState('error-ai');
         // Remove the assistant message on error
         setMessages((prev) => prev.filter((msg) => msg.id !== assistantMsgId));
       }
@@ -221,7 +207,6 @@ export function ChatArea() {
 
     if (selectedImages.length + files.length > MAX_IMAGES) {
       setErrorMessage(`Maximum ${MAX_IMAGES} images allowed`);
-      setViewState('error-global');
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -271,7 +256,6 @@ export function ChatArea() {
 
     if (errors.length > 0) {
       setErrorMessage(errors.join('; '));
-      setViewState('error-global');
     }
 
     // Reset input
@@ -308,10 +292,7 @@ export function ChatArea() {
 
       {/* Content Area */}
       <div className="flex-1 overflow-hidden">
-        {viewState === 'chat' && <ChatMessages messages={messages} />}
-        {viewState === 'loading' && <LoadingState />}
-        {viewState === 'error-global' && <ErrorState type="global" message={errorMessage} />}
-        {viewState === 'error-ai' && <ErrorState type="ai" message={errorMessage} />}
+        <ChatMessages messages={messages} />
       </div>
 
       {/* Input Area */}

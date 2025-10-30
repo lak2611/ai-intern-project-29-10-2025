@@ -3,12 +3,13 @@ import { buildSystemPrompt } from '../system-prompt';
 import { csvTools } from '../tools';
 import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 import type { StructuredToolInterface } from '@langchain/core/tools';
+import type { AgentState } from '../agent-state';
 
 /**
  * Node: Agent (Single LLM Node)
  * Processes user query with CSV tools and generates response
  */
-export async function agentNode(state: any): Promise<any> {
+export async function agentNode(state: AgentState): Promise<Partial<AgentState>> {
   const apiKey = process.env.GOOGLE_API_KEY || process.env.LLM_API_KEY;
   const modelName = process.env.LLM_MODEL || 'gemini-2.5-flash';
 
@@ -29,11 +30,11 @@ export async function agentNode(state: any): Promise<any> {
   // Convert state messages to LangChain messages
   const langchainMessages = [
     new SystemMessage(systemPrompt),
-    ...state.messages.map((msg: any) => {
+    ...state.messages.map((msg) => {
       if (msg.role === 'user') {
         // Handle multimodal content with images
         if (msg.images && msg.images.length > 0) {
-          const imageContent = msg.images.map((img: any) => ({
+          const imageContent = msg.images.map((img) => ({
             type: 'image_url' as const,
             image_url: { url: `data:${img.mimeType};base64,${img.data}` },
           }));
@@ -60,7 +61,7 @@ export async function agentNode(state: any): Promise<any> {
             firstImageDataLength: state.currentQueryImages[0]?.data?.length,
           });
 
-          const imageContents = state.currentQueryImages.map((img: any) => {
+          const imageContents = state.currentQueryImages.map((img) => {
             // Ensure base64 data is clean (no whitespace)
             const cleanData = img.data?.trim() || img.data;
             const imageUrl = `data:${img.mimeType};base64,${cleanData}`;
@@ -81,7 +82,7 @@ export async function agentNode(state: any): Promise<any> {
           ];
 
           console.log('📸 Created HumanMessage with content:', {
-            textLength: content[0]?.text?.length || 0,
+            textLength: content[0] && 'text' in content[0] ? content[0].text.length : 0,
             imageCount: imageContents.length,
           });
 
@@ -91,11 +92,10 @@ export async function agentNode(state: any): Promise<any> {
   ];
 
   // Invoke LLM with tools - loop to handle tool calls
-  let messages = langchainMessages;
+  let messages: Array<SystemMessage | HumanMessage | AIMessage | ToolMessage> = langchainMessages;
   let responseContent = '';
   let maxIterations = 5; // Prevent infinite loops
   let iteration = 0;
-  let isFinalResponse = false;
 
   while (iteration < maxIterations) {
     const response = await llm.invoke(messages);
@@ -105,12 +105,13 @@ export async function agentNode(state: any): Promise<any> {
     if (response.tool_calls && response.tool_calls.length > 0) {
       // Execute tool calls
       const toolResults = await Promise.all(
-        response.tool_calls.map(async (toolCall: any) => {
+        response.tool_calls.map(async (toolCall) => {
+          const toolCallId = toolCall.id ?? `tool_call_${Date.now()}_${Math.random()}`;
           const tool = csvTools.find((t) => t.name === toolCall.name) as StructuredToolInterface | undefined;
           if (!tool) {
             return new ToolMessage({
               content: `Tool ${toolCall.name} not found`,
-              tool_call_id: toolCall.id,
+              tool_call_id: toolCallId,
             });
           }
 
@@ -118,12 +119,13 @@ export async function agentNode(state: any): Promise<any> {
             const result = await tool.invoke(toolCall.args);
             return new ToolMessage({
               content: typeof result === 'string' ? result : JSON.stringify(result),
-              tool_call_id: toolCall.id,
+              tool_call_id: toolCallId,
             });
-          } catch (error: any) {
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
             return new ToolMessage({
-              content: `Error executing tool: ${error.message}`,
-              tool_call_id: toolCall.id,
+              content: `Error executing tool: ${errorMessage}`,
+              tool_call_id: toolCallId,
             });
           }
         })
@@ -137,7 +139,6 @@ export async function agentNode(state: any): Promise<any> {
       // For streaming, we use invoke() which LangGraph will intercept and stream
       // The response content will be streamed via LangGraph's streamEvents
       responseContent = response.content as string;
-      isFinalResponse = true;
       break;
     }
   }
@@ -151,17 +152,16 @@ export async function agentNode(state: any): Promise<any> {
   }
 
   // Add user message and assistant response to messages
-  const userMessage: any = {
+  const userMessage: AgentState['messages'][number] = {
     role: 'user' as const,
     content: state.currentQuery || '',
+    ...(state.currentQueryImages &&
+      state.currentQueryImages.length > 0 && {
+        images: state.currentQueryImages,
+      }),
   };
 
-  // Include images in user message if present
-  if (state.currentQueryImages && state.currentQueryImages.length > 0) {
-    userMessage.images = state.currentQueryImages;
-  }
-
-  const newMessages = [
+  const newMessages: AgentState['messages'] = [
     ...state.messages,
     userMessage,
     {

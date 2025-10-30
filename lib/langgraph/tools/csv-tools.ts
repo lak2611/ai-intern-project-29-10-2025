@@ -201,71 +201,6 @@ export const searchCsvTextTool = new DynamicStructuredTool({
     }
   },
 });
-
-/**
- * Tool: Compare CSV data (for multiple CSVs)
- */
-export const compareCsvDataTool = new DynamicStructuredTool({
-  name: 'compare_csv_data',
-  description: 'Compares data across multiple CSV files. Use this when users want to compare or join data from different CSV files.',
-  schema: z.object({
-    resourceIdsJson: z.string().describe('JSON string array of at least 2 resource IDs to compare'),
-    comparisonType: z.enum(['diff', 'join', 'union']).describe('Type of comparison: diff (differences), join (inner join), union (combine all rows)'),
-    joinColumnsJson: z.string().optional().describe('JSON string array of columns to use for joining (required for join operation)'),
-  }),
-  func: async ({ resourceIdsJson, comparisonType, joinColumnsJson }) => {
-    try {
-      const resourceIds = JSON.parse(resourceIdsJson) as string[];
-      const joinColumns = joinColumnsJson ? (JSON.parse(joinColumnsJson) as string[]) : undefined;
-
-      // Load all CSV files
-      const csvDataList = await Promise.all(resourceIds.map((id) => csvAnalysisService.loadCsvData(id)));
-
-      if (comparisonType === 'union') {
-        // Combine all rows
-        const allHeaders = new Set<string>();
-        csvDataList.forEach((data) => data.headers.forEach((h) => allHeaders.add(h)));
-
-        const combinedRows = csvDataList.flatMap((data) => {
-          return data.rows.map((row) => {
-            const combined: Record<string, any> = {};
-            allHeaders.forEach((header) => {
-              combined[header] = row[header] ?? null;
-            });
-            return combined;
-          });
-        });
-
-        return JSON.stringify(
-          {
-            success: true,
-            comparisonType: 'union',
-            rowCount: combinedRows.length,
-            headers: Array.from(allHeaders),
-            sampleRows: combinedRows.slice(0, 50),
-          },
-          null,
-          2
-        );
-      }
-
-      // For diff and join, simplify implementation
-      return JSON.stringify(
-        {
-          success: true,
-          comparisonType,
-          message: `${comparisonType} comparison not fully implemented yet. Consider using individual tools for each CSV.`,
-          resourceIds,
-        },
-        null,
-        2
-      );
-    } catch (error: any) {
-      return JSON.stringify({ success: false, error: error.message });
-    }
-  },
-});
-
 /**
  * Export all CSV tools
  */
@@ -276,5 +211,4 @@ export const csvTools = [
   filterAndAggregateCsvDataTool,
   getCsvStatisticsTool,
   searchCsvTextTool,
-  compareCsvDataTool,
 ];

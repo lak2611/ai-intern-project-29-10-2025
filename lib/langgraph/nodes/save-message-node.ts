@@ -1,10 +1,11 @@
 import { prisma } from '../../prisma';
+import type { AgentState } from '../agent-state';
 
 /**
  * Node: Save Message
  * Persists user message and assistant response to database
  */
-export async function saveMessageNode(state: any): Promise<any> {
+export async function saveMessageNode(state: AgentState): Promise<Partial<AgentState>> {
   try {
     // Get the last two messages (user query and assistant response)
     const messagesToSave = state.messages.slice(-2);

@@ -1,6 +1,7 @@
 import { StateGraph, Annotation, START, END } from '@langchain/langgraph';
 import { loadCsvMetadataNode, agentNode, saveMessageNode } from './nodes';
-import { CsvResourceMetadata, Message } from './agent-state';
+import { CsvResourceMetadata } from './agent-state';
+import { AgentMessage } from '@/lib/types/message';
 
 /**
  * Define the state schema using Annotation
@@ -10,8 +11,8 @@ const StateAnnotation = Annotation.Root({
     reducer: (x: string, y: string) => y ?? x,
     default: () => '',
   }),
-  messages: Annotation<Message[]>({
-    reducer: (x: Message[], y: Message[]) => y ?? x,
+  messages: Annotation<AgentMessage[]>({
+    reducer: (x: AgentMessage[], y: AgentMessage[]) => y ?? x,
     default: () => [],
   }),
   csvResourcesMetadata: Annotation<CsvResourceMetadata[]>({

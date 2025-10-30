@@ -1,14 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: Date;
-  images?: Array<{ data: string; mimeType: string; originalName: string }>;
-}
+import { Message } from '@/lib/types/message';
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -48,7 +41,7 @@ export function ChatMessages({ messages }: ChatMessagesProps) {
                   <img
                     key={idx}
                     src={`data:${img.mimeType};base64,${img.data}`}
-                    alt={img.originalName}
+                    alt={img.originalName || 'Image'}
                     className="rounded-lg max-w-full h-auto max-h-48 object-cover border border-border/50"
                   />
                 ))}

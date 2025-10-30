@@ -48,7 +48,6 @@ export function buildSystemPrompt(csvResourcesMetadata: CsvResourceMetadata[]): 
   prompt += '- filter_and_aggregate_csv_data: Combine filtering and aggregation efficiently\n';
   prompt += '- get_csv_statistics: Get descriptive statistics for numeric columns\n';
   prompt += '- search_csv_text: Search for text patterns in CSV data\n';
-  prompt += '- compare_csv_data: Compare data across multiple CSV files\n\n';
 
   prompt += 'When a user asks about CSV data:\n';
   prompt += '1. Identify which CSV file(s) are relevant from the list above\n';

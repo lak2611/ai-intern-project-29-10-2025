@@ -5,6 +5,8 @@
  * including the main AgentState interface and CsvResourceMetadata type.
  */
 
+import { AgentMessage } from '@/lib/types/message';
+
 /**
  * Metadata for a CSV resource attached to a session
  */
@@ -29,23 +31,6 @@ export interface CsvResourceMetadata {
 }
 
 /**
- * Message structure for conversation history
- */
-export interface Message {
-  /** Message role: user, assistant, or system */
-  role: 'user' | 'assistant' | 'system';
-
-  /** Message content */
-  content: string;
-
-  /** Optional images for multimodal messages */
-  images?: Array<{
-    data: string; // base64 string
-    mimeType: string;
-  }>;
-}
-
-/**
  * Main state interface for the LangGraph agent
  *
  * This state is passed between nodes in the LangGraph execution flow:
@@ -58,7 +43,7 @@ export interface AgentState {
   sessionId: string;
 
   /** Conversation history (all previous messages) */
-  messages: Message[];
+  messages: AgentMessage[];
 
   /** Metadata for CSV resources available in this session */
   csvResourcesMetadata: CsvResourceMetadata[];
@@ -92,7 +77,7 @@ export function isCsvResourceMetadata(value: any): value is CsvResourceMetadata 
 /**
  * Type guard to check if a value is a valid Message
  */
-export function isMessage(value: any): value is Message {
+export function isMessage(value: any): value is AgentMessage {
   return (
     typeof value === 'object' &&
     value !== null &&
