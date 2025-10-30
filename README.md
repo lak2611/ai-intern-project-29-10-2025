@@ -14,21 +14,36 @@ npm install
 
 ### 2) Prisma/SQLite setup
 
-- The Prisma schema is at `prisma/schema.prisma` and is preconfigured to use SQLite at `file:./prisma/dev.db`.
+- The Prisma schema is at `prisma/schema.prisma` and is preconfigured to use SQLite at `file:./prisma/prisma/dev.db`.
 - If you prefer using an environment variable instead, switch the datasource `url` to `env("DATABASE_URL")` and create a `.env` file with:
 
 ```bash
-DATABASE_URL="file:./prisma/dev.db"
+DATABASE_URL="file:./prisma/prisma/dev.db"
 ```
 
-### 3) Generate Prisma client and apply migrations
+### 3) Environment variables
+
+Create a `.env` file from the provided example and fill in the required keys:
+
+```bash
+cp .env.example .env
+```
+
+Minimum required:
+
+- `GOOGLE_API_KEY` or `LLM_API_KEY` — API key for the LLM (Gemini)
+- Optional: `LLM_MODEL` (defaults to `gemini-2.5-flash`)
+- Optional uploads config: `UPLOAD_MAX_BYTES`, `NEXT_PUBLIC_UPLOAD_MAX_BYTES`, `UPLOADS_DIR`
+- Optional Prisma config: uncomment `DATABASE_URL` if you switch the Prisma datasource to `env("DATABASE_URL")`
+
+### 4) Generate Prisma client and apply migrations
 
 ```bash
 npx prisma generate
 npx prisma migrate dev
 ```
 
-### 4) Run the development server
+### 5) Run the development server
 
 ```bash
 npm run dev
